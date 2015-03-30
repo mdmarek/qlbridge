@@ -72,7 +72,8 @@ type DataSource interface {
 	Close() error
 }
 
-// Connection
+// Connection, only one guaranteed feature, although
+// should implement many more (scan, seek, etc)
 type SourceConn interface {
 	Close() error
 }
@@ -148,7 +149,12 @@ func (m *DataSources) Get(sourceType string) DataSource {
 			return src
 		}
 	}
-	u.Warnf("what are we getting? %v", sourceType)
+	if sourceType == "" {
+		u.LogTracef(u.WARN, "No Source Type?")
+	} else {
+		u.Debugf("datasource.Get('%v')", sourceType)
+	}
+
 	if len(m.tableSources) == 0 {
 		for _, src := range m.sources {
 			tbls := src.Tables()
@@ -163,6 +169,12 @@ func (m *DataSources) Get(sourceType string) DataSource {
 	}
 	if src, ok := m.tableSources[sourceType]; ok {
 		return src
+	} else {
+		for src, _ := range m.sources {
+			u.Debugf("source: %v", src)
+		}
+		u.LogTracef(u.WARN, "No table?  len(sources)=%d len(tables)=%v", len(m.sources), len(m.tableSources))
+		u.Warnf("could not find table: %v  tables:%v", sourceType, m.tableSources)
 	}
 	return nil
 }

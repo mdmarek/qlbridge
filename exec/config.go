@@ -28,15 +28,26 @@ func NewRuntimeConfig() *RuntimeConfig {
 //  @from      database name
 func (m *RuntimeConfig) Conn(db string) datasource.SourceConn {
 
-	source := m.DataSource(m.singleConn)
-	conn, err := source.Open(db)
-	//u.Infof("Conn()%p db=%v", conn, db)
-	if err != nil {
-		u.Errorf("could not open data source: %v  %v", db, err)
-		return nil
-	}
-	return conn
+	if m.singleConn == "" {
+		if source := m.Sources.Get(strings.ToLower(db)); source != nil {
+			u.Debugf("found source: %T", source)
+			return source
+		} else {
+			u.Errorf("DataSource(%s) was not found", db)
+		}
+	} else {
+		// We have connection info, likely sq/driver
+		source := m.DataSource(m.singleConn)
+		u.Infof("source=%v    about to call Conn() db='%v'", source, db)
+		conn, err := source.Open(db)
 
+		if err != nil {
+			u.Errorf("could not open data source: %v  %v", db, err)
+			return nil
+		}
+		return conn
+	}
+	return nil
 }
 
 // given connection info, get datasource
@@ -67,10 +78,10 @@ func (m *RuntimeConfig) DataSource(connInfo string) datasource.DataSource {
 	sourceType = strings.ToLower(sourceType)
 	//u.Debugf("source: %v", sourceType)
 	if source := m.Sources.Get(sourceType); source != nil {
-		//u.Debugf("source: %T", source)
+		u.Debugf("source: %T", source)
 		return source
 	} else {
-		u.Errorf("source was not found: '%v'", sourceType)
+		u.Errorf("DataSource(conn) was not found: '%v'", sourceType)
 	}
 
 	return nil

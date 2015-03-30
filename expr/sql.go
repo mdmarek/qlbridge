@@ -16,11 +16,17 @@ var (
 
 	// Ensure SqlSelect and cousins etc are NodeTypes
 	_ Node = (*SqlSelect)(nil)
+	_ Node = (*SqlSource)(nil)
+	_ Node = (*SqlWhere)(nil)
 	_ Node = (*SqlInsert)(nil)
 	_ Node = (*SqlUpsert)(nil)
 	_ Node = (*SqlUpdate)(nil)
-	_ Node = (*SqlInsert)(nil)
-	_ Node = (*SqlSource)(nil)
+	_ Node = (*SqlDelete)(nil)
+
+	_ Node = (*SqlInto)(nil)
+	//_ Node = (*Join)(nil)
+
+	_ Node = (*SqlShow)(nil)
 	_ Node = (*SqlDescribe)(nil)
 )
 
@@ -241,6 +247,7 @@ func (m *Column) String() string {
 	}
 	buf := bytes.Buffer{}
 	if m.Expr != nil {
+		//u.Debugf("has expr: %T %#v", m.Expr, m.Expr)
 		buf.WriteString(m.Expr.StringAST())
 	}
 	if m.asQuoteByte != 0 && m.originalAs != "" {
@@ -322,10 +329,10 @@ func (m *SqlSelect) String() string {
 		buf.WriteString(fmt.Sprintf(" INTO %v", m.Into))
 	}
 	if m.From != nil {
-		buf.WriteString(" FROM ")
+		buf.WriteString(" FROM")
 		for _, from := range m.From {
-			buf.WriteString(from.StringAST())
 			buf.WriteByte(' ')
+			buf.WriteString(from.StringAST())
 		}
 	}
 	if m.Where != nil {
@@ -496,13 +503,25 @@ func (m *SqlSource) Rewrite(stmt *SqlSelect) *SqlSelect {
 				// Was not left/right qualified, so use as is
 				m.Columns = append(m.Columns, col)
 			} else if ok && left == m.Alias {
-				m.Columns = append(m.Columns, col.RewriteFor(m.Alias))
+				newCol := col.RewriteFor(m.Alias)
+				n := rewriteNode(m, col.Expr)
+				if n != nil {
+					newCol.Expr = n
+				}
+				m.Columns = append(m.Columns, newCol)
 			} else {
 				// not used in this source
 			}
 		}
 	}
-	return nil
+	// TODO:
+	//  - rewrite the Where clause
+	//  - rewrite the Sort
+	sql2 := &SqlSelect{Columns: m.Columns, Star: m.Star}
+	sql2.From = append(sql2.From, &SqlSource{Name: m.Name})
+	sql2.Columns = columnsFromNode(m, m.JoinExpr, sql2.Columns)
+	//u.Debugf("cols len: %v", len(sql2.Columns))
+	return sql2
 }
 
 func (m *SqlSource) findFromAliases() (string, string) {
@@ -526,6 +545,82 @@ func (m *SqlSource) findFromAliases() (string, string) {
 	}
 	return from1, from2
 }
+
+func columnsFromNode(from *SqlSource, node Node, cols Columns) Columns {
+	switch nt := node.(type) {
+	case *IdentityNode:
+		if left, right, ok := nt.LeftRight(); ok {
+			//u.Debugf("from.Name:%v l:%v  r;%v", from.alias, left, right)
+			if left == from.alias {
+				found := false
+				for _, col := range cols {
+					if colLeft, _, ok := col.LeftRight(); ok {
+						if left == colLeft {
+							found = true
+						}
+					}
+				}
+				if !found {
+
+					in := IdentityNode{Text: right}
+					cols = append(cols, &Column{As: right, Expr: &in})
+					//u.Warnf("nice, found it! len(cols) = %v", len(cols))
+				}
+			}
+		}
+	case *BinaryNode:
+		switch nt.Operator.T {
+		case lex.TokenAnd, lex.TokenLogicOr:
+			cols = columnsFromNode(from, nt.Args[0], cols)
+			cols = columnsFromNode(from, nt.Args[1], cols)
+		case lex.TokenEqual, lex.TokenEqualEqual:
+			cols = columnsFromNode(from, nt.Args[0], cols)
+			cols = columnsFromNode(from, nt.Args[1], cols)
+		default:
+			u.Warnf("un-implemented op: %v", nt.Operator)
+		}
+	default:
+		u.Warnf("%T node types are not suppored yet for join rewrite", node)
+	}
+	return cols
+}
+
+func rewriteNode(from *SqlSource, node Node) Node {
+	switch nt := node.(type) {
+	case *IdentityNode:
+		if left, right, ok := nt.LeftRight(); ok {
+			//u.Debugf("from.Name:%v l:%v  r;%v", from.alias, left, right)
+			if left == from.alias {
+				in := IdentityNode{Text: right}
+				//u.Warnf("nice, found it! in = %v", in)
+				return &in
+			}
+		}
+	case *BinaryNode:
+		switch nt.Operator.T {
+		case lex.TokenAnd, lex.TokenLogicOr:
+			n1 := rewriteNode(from, nt.Args[0])
+			n2 := rewriteNode(from, nt.Args[1])
+			return &BinaryNode{Operator: nt.Operator, Args: [2]Node{n1, n2}}
+		case lex.TokenEqual, lex.TokenEqualEqual:
+			n := rewriteNode(from, nt.Args[0])
+			if n != nil {
+				return n
+			}
+			n = rewriteNode(from, nt.Args[1])
+			if n != nil {
+				return n
+			}
+			u.Warnf("Could not find node: %#v", node)
+		default:
+			u.Warnf("un-implemented op: %v", nt.Operator)
+		}
+	default:
+		u.Warnf("%T node types are not suppored yet for join rewrite", node)
+	}
+	return nil
+}
+
 func (m *SqlSource) UnAliasedColumns() map[string]*Column {
 	return m.cols
 	cols := make(map[string]*Column)

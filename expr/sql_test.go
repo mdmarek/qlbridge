@@ -130,11 +130,22 @@ func compareNode(t *testing.T, n1, n2 Node) {
 }
 
 func TestSqlRewrite(t *testing.T) {
-	s := `SELECT u.user_id, u.email, o.item_id,o.price
+	s := `SELECT u.name, u.email, o.item_id,o.price
 			FROM users AS u INNER JOIN orders AS o 
 			ON u.user_id = o.user_id;`
+	/*
+		- Do we want to send the columns fully aliased?   ie
+			SELECT name AS u.name, email as u.email, user_id as u.user_id FROM users
+
+	*/
 	sql := parseOrPanic(t, s).(*SqlSelect)
 	assert.Tf(t, len(sql.Columns) == 4, "has 4 cols: %v", len(sql.Columns))
+	assert.Tf(t, len(sql.From) == 2, "has 2 sources: %v", len(sql.From))
+	rw1 := sql.From[0].Rewrite(sql)
+	assert.Tf(t, rw1 != nil, "should not be nil:")
+	assert.Tf(t, len(rw1.Columns) == 3, "has 3 cols: %v", rw1.Columns.String())
+	u.Infof("SQL?: '%v'", rw1.String())
+	assert.Tf(t, rw1.String() == "SELECT name, email, user_id FROM users", "%v", rw1.String())
 	// Do we change?
 	//assert.Equal(t, sql.Columns.FieldNames(), []string{"user_id", "email", "item_id", "price"})
 }

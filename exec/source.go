@@ -117,8 +117,9 @@ func NewSourceJoin(leftFrom, rightFrom *expr.SqlSource, conf *RuntimeConfig) (*S
 	m.leftStmt = leftFrom
 	m.rightStmt = rightFrom
 
+	u.Debugf("get left1.Name: %v", leftFrom.Name)
 	source := conf.Conn(leftFrom.Name)
-	u.Debugf("source: %T", source)
+	u.Debugf("left source: %T", source)
 	// Must provider either Scanner, and or Seeker interfaces
 	if scanner, ok := source.(datasource.Scanner); !ok {
 		u.Errorf("Could not create scanner for %v  %T %#v", leftFrom.Name, source, source)
@@ -127,6 +128,7 @@ func NewSourceJoin(leftFrom, rightFrom *expr.SqlSource, conf *RuntimeConfig) (*S
 		m.leftSource = scanner
 	}
 
+	u.Debugf("get rightFrom.Name: %v", rightFrom.Name)
 	source2 := conf.Conn(rightFrom.Name)
 	u.Debugf("source right: %T", source2)
 	// Must provider either Scanner, and or Seeker interfaces
